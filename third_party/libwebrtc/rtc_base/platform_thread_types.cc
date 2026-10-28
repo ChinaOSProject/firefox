@@ -15,10 +15,6 @@
 #include <linux/prctl.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
-
-#if !defined(WEBRTC_ARCH_ARM) && !defined(WEBRTC_ARCH_ARM64)
-#include <asm/unistd_64.h>
-#endif
 #endif
 
 #if defined(WEBRTC_WIN)
