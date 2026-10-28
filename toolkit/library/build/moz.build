@@ -12,6 +12,10 @@ USE_LIBS += ["gkrust"]
 
 Libxul("xul-real")
 
+if CONFIG["OS_ARCH"] == "Linux" and CONFIG["TARGET_CPU"] == "loongarch64":
+    LDFLAGS += ["-Wl,-T,%s/loongarch64.ld" % SRCDIR]
+    EXTRA_LINK_DEPS += ["loongarch64.ld"]
+
 if CONFIG["COMPILE_ENVIRONMENT"]:
     if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("cocoa", "uikit"):
         full_libname = SHARED_LIBRARY_NAME
