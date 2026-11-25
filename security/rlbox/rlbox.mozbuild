@@ -28,6 +28,10 @@ def RLBoxLibrary(name, use_segue=True):
     # Use a mmap style allocation
     DEFINES["WASM_RT_USE_MMAP"] = 1
 
+    # The default SIMD read barrier requires vector registers on LoongArch.
+    if CONFIG["TARGET_CPU"] == "loongarch64":
+        DEFINES["WASM_RT_MEMCHECK_BOUNDS_CHECK"] = 1
+
     # Don't use internal signal handler as Firefox already provides one
     DEFINES["WASM_RT_SKIP_SIGNAL_RECOVERY"] = 1
 
