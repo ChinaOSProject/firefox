@@ -8,6 +8,7 @@
     .text
     .globl SharedStub
     .hidden SharedStub
+    .hidden PrepareAndDispatch
     .type  SharedStub,@function
 
 SharedStub:
@@ -40,13 +41,14 @@ SharedStub:
     move      $a3, $sp
     addi.d    $a4, $sp, 8*NGPRGES
 
-    call36    PrepareAndDispatch
+    la.local  $t0, $t1, PrepareAndDispatch
+    jirl      $ra, $t0, 0
 
     ld.d      $ra, $sp, 136
     .cfi_restore 1
     addi.d    $sp, $sp, 8*(NGPRGES+NFPREGS)+16
     .cfi_adjust_cfa_offset -8*(NGPRGES+NFPREGS)-16
-    ret
+    jirl      $zero, $ra, 0
     .cfi_endproc
 
     .size SharedStub, .-SharedStub

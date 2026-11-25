@@ -8,6 +8,7 @@
 
   .text
   .globl  _NS_InvokeByIndex
+  .hidden invoke_copy_to_stack
   .type   _NS_InvokeByIndex, @function
 /*
  * _NS_InvokeByIndex(nsISupports* that, uint32_t methodIndex,
@@ -43,7 +44,8 @@ _NS_InvokeByIndex:
   move      $a0, $sp
   addi.d    $a1, $sp, 8*NGPREGS
 
-  call36    invoke_copy_to_stack
+  la.local  $t0, $t1, invoke_copy_to_stack
+  jirl      $ra, $t0, 0
 
   /* 1st argument is this */
   move      $a0, $s2
@@ -85,8 +87,7 @@ _NS_InvokeByIndex:
   .cfi_restore 1
   addi.d    $sp, $sp, 32
   .cfi_adjust_cfa_offset -32
-  ret
+  jirl      $zero, $ra, 0
   .cfi_endproc
   .size   _NS_InvokeByIndex, .-_NS_InvokeByIndex
   .section .note.GNU-stack, "", @progbits
-

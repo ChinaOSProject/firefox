@@ -114,7 +114,7 @@ extern "C" nsresult ATTRIBUTE_USED PrepareAndDispatch(nsXPTCStubBase* self,
   return result;
 }
 
-// Load $t6 with the constant 'n' and branch (via scratch $t7) to SharedStub().
+// Load $t6 with the constant 'n' and branch to SharedStub().
 // clang-format off
 #define STUB_ENTRY(n)                                                 \
   __asm__(                                                            \
@@ -138,7 +138,8 @@ extern "C" nsresult ATTRIBUTE_USED PrepareAndDispatch(nsXPTCStubBase* self,
       ".err   \"stub number "#n" >= 1000 not yet supported\"\n"       \
       ".endif \n\t"                                                   \
       "li.d   $t6, "#n" \n\t"                                         \
-      "tail36 $t7, SharedStub \n"                                     \
+      "la.local $t7, $t8, SharedStub \n"                              \
+      "jirl $zero, $t7, 0 \n"                                         \
       ".if "#n" < 10 \n\t"                                            \
       ".size   _ZN14nsXPTCStubBase5Stub"#n"Ev,.-_ZN14nsXPTCStubBase5Stub"#n"Ev\n\t" \
       ".elseif "#n" < 100 \n\t"                                                     \
