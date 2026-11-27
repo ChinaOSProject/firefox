@@ -18,6 +18,7 @@
 // replace those syscalls, but they could also be used directly.
 
 struct stat;
+struct statx;
 struct sockaddr_un;
 
 namespace mozilla {
@@ -31,6 +32,10 @@ class SandboxBrokerClient final : private SandboxBrokerCommon {
   int Access(const char* aPath, int aMode);
   int Stat(const char* aPath, statstruct* aStat);
   int LStat(const char* aPath, statstruct* aStat);
+#ifdef __loongarch64
+  int Statx(const char* aPath, int aFlags, unsigned int aMask,
+            struct statx* aStat, int aStatFd = -1);
+#endif
   int Chmod(const char* aPath, int aMode);
   int Link(const char* aPath, const char* aPath2);
   int Mkdir(const char* aPath, int aMode);
@@ -44,7 +49,7 @@ class SandboxBrokerClient final : private SandboxBrokerCommon {
   int mFileDesc;
 
   int DoCall(const Request* aReq, const char* aPath, const char* aPath2,
-             void* aReponseBuff, bool expectFd);
+             void* aReponseBuff, bool expectFd, int aExtraFd = -1);
 };
 
 }  // namespace mozilla

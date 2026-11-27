@@ -49,6 +49,9 @@ const char* SandboxBrokerCommon::OperationDescription(Operation aOp) {
   static constexpr const char* kNames[] = {
       "open",   "access", "stat",   "chmod",    "link",    "mkdir",
       "rename", "rmdir",  "unlink", "readlink", "connect", "connect-abstract",
+#ifdef __loongarch64
+      "statx",
+#endif
   };
 
   static_assert(
@@ -60,16 +63,20 @@ const char* SandboxBrokerCommon::OperationDescription(Operation aOp) {
 
 /* static */
 ssize_t SandboxBrokerCommon::RecvWithFd(int aFd, const iovec* aIO,
-                                        size_t aNumIO, int* aPassedFdPtr) {
+                                        size_t aNumIO, int* aPassedFdPtr,
+                                        int* aExtraFdPtr) {
   struct msghdr msg = {};
   msg.msg_iov = const_cast<iovec*>(aIO);
   msg.msg_iovlen = aNumIO;
 
-  char cmsg_buf[CMSG_SPACE(sizeof(int))];
+  alignas(cmsghdr) char cmsg_buf[CMSG_SPACE(2 * sizeof(int))];
   if (aPassedFdPtr) {
     msg.msg_control = cmsg_buf;
-    msg.msg_controllen = sizeof(cmsg_buf);
+    msg.msg_controllen = CMSG_SPACE((aExtraFdPtr ? 2 : 1) * sizeof(int));
     *aPassedFdPtr = -1;
+  }
+  if (aExtraFdPtr) {
+    *aExtraFdPtr = -1;
   }
 
   ssize_t rv;
@@ -82,7 +89,7 @@ ssize_t SandboxBrokerCommon::RecvWithFd(int aFd, const iovec* aIO,
     rv = recvmsg(aFd, &msg, MSG_CMSG_CLOEXEC);
   } while (rv < 0 && errno == EINTR);
 
-  if (rv <= 0) {
+  if (rv < 0) {
     return rv;
   }
   if (msg.msg_controllen > 0) {
@@ -90,7 +97,9 @@ ssize_t SandboxBrokerCommon::RecvWithFd(int aFd, const iovec* aIO,
     struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
     if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
       int* fds = reinterpret_cast<int*>(CMSG_DATA(cmsg));
-      if (cmsg->cmsg_len != CMSG_LEN(sizeof(int))) {
+      const bool hasExtra = cmsg->cmsg_len == CMSG_LEN(2 * sizeof(int));
+      if (cmsg->cmsg_len != CMSG_LEN(sizeof(int)) &&
+          !(aExtraFdPtr && hasExtra)) {
         // A client could, for example, send an extra 32-bit int if
         // CMSG_SPACE pads to 64-bit size_t alignment.  If so, treat
         // it as an error, but also don't leak the fds.
@@ -105,6 +114,9 @@ ssize_t SandboxBrokerCommon::RecvWithFd(int aFd, const iovec* aIO,
         return -1;
       }
       *aPassedFdPtr = fds[0];
+      if (hasExtra) {
+        *aExtraFdPtr = fds[1];
+      }
     } else {
       errno = EPROTO;
       return -1;
@@ -114,6 +126,10 @@ ssize_t SandboxBrokerCommon::RecvWithFd(int aFd, const iovec* aIO,
     if (aPassedFdPtr && *aPassedFdPtr >= 0) {
       close(*aPassedFdPtr);
       *aPassedFdPtr = -1;
+    }
+    if (aExtraFdPtr && *aExtraFdPtr >= 0) {
+      close(*aExtraFdPtr);
+      *aExtraFdPtr = -1;
     }
     // MSG_CTRUNC usually means the attached fd was dropped due to fd
     // exhaustion in the receiving process, so map that to `EMFILE`.
@@ -135,21 +151,27 @@ ssize_t SandboxBrokerCommon::RecvWithFd(int aFd, const iovec* aIO,
 
 /* static */
 ssize_t SandboxBrokerCommon::SendWithFd(int aFd, const iovec* aIO,
-                                        size_t aNumIO, int aPassedFd) {
+                                        size_t aNumIO, int aPassedFd,
+                                        int aExtraFd) {
   struct msghdr msg = {};
   msg.msg_iov = const_cast<iovec*>(aIO);
   msg.msg_iovlen = aNumIO;
 
-  char cmsg_buf[CMSG_SPACE(sizeof(int))];
+  alignas(cmsghdr) char cmsg_buf[CMSG_SPACE(2 * sizeof(int))];
   memset(cmsg_buf, 0, sizeof(cmsg_buf));
   if (aPassedFd != -1) {
+    const size_t fdsSize = (aExtraFd != -1 ? 2 : 1) * sizeof(int);
     msg.msg_control = cmsg_buf;
-    msg.msg_controllen = sizeof(cmsg_buf);
+    msg.msg_controllen = CMSG_SPACE(fdsSize);
     struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
     cmsg->cmsg_level = SOL_SOCKET;
     cmsg->cmsg_type = SCM_RIGHTS;
-    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
-    *reinterpret_cast<int*>(CMSG_DATA(cmsg)) = aPassedFd;
+    cmsg->cmsg_len = CMSG_LEN(fdsSize);
+    int* fds = reinterpret_cast<int*>(CMSG_DATA(cmsg));
+    fds[0] = aPassedFd;
+    if (aExtraFd != -1) {
+      fds[1] = aExtraFd;
+    }
   }
 
   ssize_t rv;

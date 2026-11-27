@@ -30,6 +30,8 @@
 #  define SANDBOX_ARCH_NAME "arm"
 #elif defined(__aarch64__)
 #  define SANDBOX_ARCH_NAME "arm64"
+#elif defined(ARCH_CPU_LOONGARCH64)
+#  define SANDBOX_ARCH_NAME "loongarch64"
 #else
 #  error "unrecognized architecture"
 #endif

@@ -60,7 +60,7 @@ long sys_clone(unsigned long flags,
   if (ctid) MSAN_UNPOISON(ctid, sizeof(*ctid));
   // See kernel/fork.c in Linux. There is different ordering of sys_clone
   // parameters depending on CONFIG_CLONE_BACKWARDS* configuration options.
-#if defined(ARCH_CPU_X86_64)
+#if defined(ARCH_CPU_X86_64) || defined(ARCH_CPU_LOONGARCH64)
   return syscall(__NR_clone, flags, child_stack, ptid, ctid, tls);
 #elif defined(ARCH_CPU_X86) || defined(ARCH_CPU_ARM_FAMILY) || \
     defined(ARCH_CPU_MIPS_FAMILY)
@@ -148,6 +148,9 @@ int sys_unshare(int flags) {
 }
 
 int sys_sigprocmask(int how, const sigset_t* set, std::nullptr_t oldset) {
+#if defined(ARCH_CPU_LOONGARCH64)
+  return sigprocmask(how, set, oldset);
+#else
   // In some toolchain (in particular Android and PNaCl toolchain),
   // sigset_t is 32 bits, but the Linux ABI uses more.
   LinuxSigSet linux_value;
@@ -157,6 +160,7 @@ int sys_sigprocmask(int how, const sigset_t* set, std::nullptr_t oldset) {
 
   return syscall(__NR_rt_sigprocmask, how, &linux_value, nullptr,
                  sizeof(linux_value));
+#endif
 }
 
 int sys_sigaction(int signum,

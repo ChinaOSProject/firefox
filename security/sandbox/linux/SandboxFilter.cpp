@@ -436,6 +436,55 @@ class SandboxPolicyCommon : public SandboxPolicyBase {
                                               : broker->LStat(path, buf);
   }
 
+#ifdef __loongarch64
+  static intptr_t StatxTrap(ArgsRef aArgs, void* aux) {
+    auto broker = static_cast<SandboxBrokerClient*>(aux);
+    auto fd = static_cast<int>(aArgs.args[0]);
+    auto path = reinterpret_cast<const char*>(aArgs.args[1]);
+    auto flags = static_cast<int>(aArgs.args[2]);
+    auto mask = static_cast<unsigned int>(aArgs.args[3]);
+    auto buf = reinterpret_cast<struct statx*>(aArgs.args[4]);
+
+    if (!buf || (!path && !(flags & AT_EMPTY_PATH))) {
+      return -EFAULT;
+    }
+    if (fd != AT_FDCWD && (flags & AT_EMPTY_PATH) && (!path || !*path)) {
+      if (fd < 0) {
+        return -EBADF;
+      }
+      if (broker) {
+        return broker->Statx("", flags, mask, buf, fd);
+      }
+      return DoSyscall(__NR_statx, fd, nullptr, flags, mask, buf);
+    }
+    if (!broker || (fd != AT_FDCWD && path[0] != '/')) {
+      return -EACCES;
+    }
+    return broker->Statx(path ? path : "", flags, mask, buf);
+  }
+
+  static ResultExpr StatxPolicy(SandboxBrokerClient* aBroker) {
+    if (aBroker) {
+      return Trap(StatxTrap, aBroker);
+    }
+    static const bool supportsNullPath = [] {
+      struct statx stat;
+      return DoSyscall(__NR_statx, AT_FDCWD, nullptr, AT_EMPTY_PATH,
+                       STATX_BASIC_STATS, &stat) == 0;
+    }();
+    if (!supportsNullPath) {
+      return Error(ENOSYS);
+    }
+    Arg<unsigned int> fd(0);
+    Arg<uintptr_t> path(1);
+    Arg<int> flags(2);
+    return If(AllOf((fd & (1U << 31)) == 0, path == 0,
+                    (flags & AT_EMPTY_PATH) != 0),
+              Allow())
+        .Else(Trap(StatxTrap, nullptr));
+  }
+#endif
+
   static intptr_t ChmodAtTrap(ArgsRef aArgs, void* aux) {
     auto broker = static_cast<SandboxBrokerClient*>(aux);
     auto fd = static_cast<int>(aArgs.args[0]);
@@ -980,10 +1029,14 @@ class SandboxPolicyCommon : public SandboxPolicyBase {
           return Trap(AccessAt2Trap, mBroker);
         CASES_FOR_fstatat:
           return Trap(StatAtTrap, mBroker);
-        // Used by new libc and Rust's stdlib, if available.
-        // We don't have broker support yet so claim it does not exist.
         case __NR_statx:
+#ifdef __loongarch64
+          return StatxPolicy(mBroker);
+#else
+          // Used by new libc and Rust's stdlib, if available.
+          // We don't have broker support yet so claim it does not exist.
           return Error(ENOSYS);
+#endif
         case __NR_fchmodat:
           return Trap(ChmodAtTrap, mBroker);
         case __NR_linkat:
@@ -992,8 +1045,16 @@ class SandboxPolicyCommon : public SandboxPolicyBase {
           return Trap(MkdirAtTrap, mBroker);
         case __NR_symlinkat:
           return Error(EPERM);
+#ifdef __NR_renameat
         case __NR_renameat:
           return Trap(RenameAtTrap, mBroker);
+#endif
+#ifdef ARCH_CPU_LOONGARCH64
+        case __NR_renameat2: {
+          Arg<unsigned int> flags(4);
+          return If(flags == 0, Trap(RenameAtTrap, mBroker)).Else(Error(EINVAL));
+        }
+#endif
         case __NR_unlinkat:
           return Trap(UnlinkAtTrap, mBroker);
         case __NR_readlinkat:
@@ -1005,7 +1066,11 @@ class SandboxPolicyCommon : public SandboxPolicyBase {
       switch (sysno) {
         // statx may be used for fstat (bug 1867673)
         case __NR_statx:
+#ifdef __loongarch64
+          return StatxPolicy(nullptr);
+#else
           return Error(ENOSYS);
+#endif
         CASES_FOR_fstatat:
           return Trap(StatAtTrap, nullptr);
       }

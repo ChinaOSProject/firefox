@@ -39,7 +39,12 @@ class SandboxBrokerCommon {
     SANDBOX_FILE_READLINK,
     SANDBOX_SOCKET_CONNECT,
     SANDBOX_SOCKET_CONNECT_ABSTRACT,
+#ifdef __loongarch64
+    SANDBOX_FILE_STATX,
+    SANDBOX_OP_MAX_VALUE = SANDBOX_FILE_STATX
+#else
     SANDBOX_OP_MAX_VALUE = SANDBOX_SOCKET_CONNECT_ABSTRACT
+#endif
   };
   MOZ_USING_ENUM_STATIC(Operation, SANDBOX_FILE_OPEN, SANDBOX_FILE_ACCESS,
                         SANDBOX_FILE_STAT, SANDBOX_FILE_CHMOD,
@@ -76,6 +81,9 @@ class SandboxBrokerCommon {
     uint64_t mId;
     // Size of return value buffer, if any
     size_t mBufSize;
+#ifdef __loongarch64
+    unsigned int mStatxMask = 0;
+#endif
     // The rest of the packet is the pathname.
     // SCM_RIGHTS for response socket attached.
   };
@@ -93,9 +101,9 @@ class SandboxBrokerCommon {
   static const size_t kMaxPathLen = 4096;
 
   static ssize_t RecvWithFd(int aFd, const iovec* aIO, size_t aNumIO,
-                            int* aPassedFdPtr);
+                            int* aPassedFdPtr, int* aExtraFdPtr = nullptr);
   static ssize_t SendWithFd(int aFd, const iovec* aIO, size_t aNumIO,
-                            int aPassedFd);
+                            int aPassedFd, int aExtraFd = -1);
 };
 
 }  // namespace mozilla

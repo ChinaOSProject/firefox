@@ -29,6 +29,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/ipc/FileDescriptor.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryServiceDefs.h"
@@ -703,7 +704,14 @@ void SandboxBroker::ThreadMain(void) {
     char respBuf[kMaxPathLen + 1];  // Also serves as struct stat
     Request req;
     Response resp;
-    int respfd;
+#ifdef __loongarch64
+    struct statx statxResult = {};
+    int receivedStatFd;
+    int* extraFd = &receivedStatFd;
+#else
+    int* extraFd = nullptr;
+#endif
+    int receivedResponseFd;
 
     // Make sure stat responses fit in the response buffer
     MOZ_ASSERT((kMaxPathLen + 1) > sizeof(struct stat));
@@ -716,7 +724,13 @@ void SandboxBroker::ThreadMain(void) {
     ios[1].iov_base = recvBuf;
     ios[1].iov_len = sizeof(recvBuf);
 
-    const ssize_t recvd = RecvWithFd(mFileDesc, ios, 2, &respfd);
+    const ssize_t recvd = RecvWithFd(mFileDesc, ios, 2, &receivedResponseFd,
+                                    extraFd);
+    UniqueFileHandle responseFd(receivedResponseFd);
+    const int respfd = responseFd.get();
+#ifdef __loongarch64
+    UniqueFileHandle statFd(receivedStatFd);
+#endif
     if (recvd == 0) {
       if (SandboxInfo::Get().Test(SandboxInfo::kVerbose)) {
         SANDBOX_LOG("EOF from pid %d", mChildPid);
@@ -757,6 +771,25 @@ void SandboxBroker::ThreadMain(void) {
     ios[1].iov_base = nullptr;
     ios[1].iov_len = 0;
     int openedFd = -1;
+#ifdef __loongarch64
+    auto doStatx = [&](int aDirFd, const char* aPath) {
+      constexpr int kAllowedStatxFlags =
+          AT_EMPTY_PATH | AT_NO_AUTOMOUNT | AT_SYMLINK_NOFOLLOW |
+          AT_STATX_SYNC_TYPE;
+      if (req.mFlags & ~kAllowedStatxFlags) {
+        resp.mError = -EINVAL;
+        return;
+      }
+      if (syscall(__NR_statx, aDirFd, aPath, req.mFlags, req.mStatxMask,
+                  &statxResult) == 0) {
+        resp.mError = 0;
+        ios[1].iov_base = &statxResult;
+        ios[1].iov_len = sizeof(statxResult);
+      } else {
+        resp.mError = -errno;
+      }
+    };
+#endif
 
     // Clear permissions
     int perms;
@@ -769,6 +802,15 @@ void SandboxBroker::ThreadMain(void) {
       shutdown(mFileDesc, SHUT_RD);
       break;
     }
+
+#ifdef __loongarch64
+    if (statFd && (req.mOp != Operation::SANDBOX_FILE_STATX || recvBufLen != 1 ||
+                   recvBuf[0] != '\0' || !(req.mFlags & AT_EMPTY_PATH))) {
+      SANDBOX_LOG("unexpected stat descriptor from pid %d", mChildPid);
+      shutdown(mFileDesc, SHUT_RD);
+      break;
+    }
+#endif
 
     // First path should fit in maximum path length buffer.
     size_t first_len = strlen(recvBuf);
@@ -835,6 +877,11 @@ void SandboxBroker::ThreadMain(void) {
     }
 
     // And now perform the operation if allowed.
+#ifdef __loongarch64
+    if (statFd) {
+      doStatx(statFd.get(), "");
+    } else
+#endif
     if (perms & CRASH_INSTEAD) {
       // This is somewhat nonmodular, but it works.
       resp.mError = -ENOSYS;
@@ -886,6 +933,12 @@ void SandboxBroker::ThreadMain(void) {
             resp.mError = -errno;
           }
           break;
+
+#ifdef __loongarch64
+        case Operation::SANDBOX_FILE_STATX:
+          doStatx(AT_FDCWD, pathBuf);
+          break;
+#endif
 
         case SANDBOX_FILE_CHMOD:
           if (permissive || AllowOperation(W_OK, perms)) {
@@ -1066,8 +1119,6 @@ void SandboxBroker::ThreadMain(void) {
     if (SendWithFd(respfd, &fakeIO, 1, respfd) < 0) {
       MOZ_ASSERT(errno == EPIPE || errno == ECONNREFUSED || errno == ENOTCONN);
     }
-
-    close(respfd);
 
     if (openedFd >= 0) {
       close(openedFd);

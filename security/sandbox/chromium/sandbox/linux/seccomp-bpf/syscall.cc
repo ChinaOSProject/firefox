@@ -19,7 +19,7 @@ namespace sandbox {
 namespace {
 
 #if defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARM_FAMILY) || \
-    defined(ARCH_CPU_MIPS_FAMILY)
+    defined(ARCH_CPU_MIPS_FAMILY) || defined(ARCH_CPU_LOONGARCH64)
 // Number that's not currently used by any Linux kernel ABIs.
 const int kInvalidSyscallNumber = 0x351d3;
 #else
@@ -309,10 +309,30 @@ asm(// We need to be able to tell the kernel exactly where we made a
     "2:ret\n"
     ".cfi_endproc\n"
     ".size SyscallAsm, .-SyscallAsm\n"
+#elif defined(ARCH_CPU_LOONGARCH64)
+    ".text\n"
+    ".align 2\n"
+    ".type SyscallAsm, @function\n"
+    "SyscallAsm:\n"
+    ".cfi_startproc\n"
+    "bge $a0, $zero, 1f\n"
+    "la.local $a0, 2f\n"
+    "b 2f\n"
+    "1:move $a7, $a0\n"
+    "ld.d $a0, $a1, 0\n"
+    "ld.d $a2, $a1, 16\n"
+    "ld.d $a3, $a1, 24\n"
+    "ld.d $a4, $a1, 32\n"
+    "ld.d $a5, $a1, 40\n"
+    "ld.d $a1, $a1, 8\n"
+    "syscall 0\n"
+    "2:jirl $zero, $ra, 0\n"
+    ".cfi_endproc\n"
+    ".size SyscallAsm, .-SyscallAsm\n"
 #endif
     );  // asm
 
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(ARCH_CPU_LOONGARCH64)
 extern "C" {
 intptr_t SyscallAsm(intptr_t nr, const intptr_t args[6]);
 }
@@ -371,7 +391,7 @@ intptr_t Syscall::Call(int nr,
       : "=a"(ret)
       : "0"(ret), "D"(args)
       : "cc", "esp", "memory", "ecx", "edx");
-#elif defined(__x86_64__)
+#elif defined(__x86_64__) || defined(ARCH_CPU_LOONGARCH64)
   intptr_t ret = SyscallAsm(nr, args);
 #elif defined(__arm__)
   intptr_t ret;

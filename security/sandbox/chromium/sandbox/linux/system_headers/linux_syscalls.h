@@ -44,4 +44,8 @@
 #include "sandbox/linux/system_headers/arm64_linux_syscalls.h"
 #endif
 
+#if defined(ARCH_CPU_LOONGARCH64)
+#include "sandbox/linux/system_headers/loongarch64_linux_syscalls.h"
+#endif
+
 #endif  // SANDBOX_LINUX_SYSTEM_HEADERS_LINUX_SYSCALLS_H_

@@ -28,7 +28,7 @@ SandboxBrokerClient::~SandboxBrokerClient() { close(mFileDesc); }
 
 int SandboxBrokerClient::DoCall(const Request* aReq, const char* aPath,
                                 const char* aPath2, void* aResponseBuff,
-                                bool expectFd) {
+                                bool expectFd, int aExtraFd) {
   // Remap /proc/self to the actual pid, so that the broker can open
   // it.  This happens here instead of in the broker to follow the
   // principle of least privilege and keep the broker as simple as
@@ -91,7 +91,7 @@ int SandboxBrokerClient::DoCall(const Request* aReq, const char* aPath,
   if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, respFds) < 0) {
     return -errno;
   }
-  const ssize_t sent = SendWithFd(mFileDesc, ios, 3, respFds[1]);
+  const ssize_t sent = SendWithFd(mFileDesc, ios, 3, respFds[1], aExtraFd);
   const int sendErrno = errno;
   MOZ_ASSERT(sent < 0 || static_cast<size_t>(sent) ==
                              ios[0].iov_len + ios[1].iov_len + ios[2].iov_len);
@@ -194,6 +194,15 @@ int SandboxBrokerClient::LStat(const char* aPath, statstruct* aStat) {
   Request req = MakeRequest(SANDBOX_FILE_STAT, O_NOFOLLOW, sizeof(statstruct));
   return DoCall(&req, aPath, nullptr, (void*)aStat, false);
 }
+
+#ifdef __loongarch64
+int SandboxBrokerClient::Statx(const char* aPath, int aFlags, unsigned int aMask,
+                              struct statx* aStat, int aStatFd) {
+  Request req = MakeRequest(Operation::SANDBOX_FILE_STATX, aFlags, sizeof(*aStat));
+  req.mStatxMask = aMask;
+  return DoCall(&req, aPath, nullptr, aStat, false, aStatFd);
+}
+#endif
 
 int SandboxBrokerClient::Chmod(const char* aPath, int aMode) {
   Request req = MakeRequest(SANDBOX_FILE_CHMOD, aMode, 0);
